@@ -314,7 +314,7 @@ class PydanticGenerator(OOCodeGenerator):
                 # not as a list, that means a dictionary
                 elif "linkml:elements" in slot.implements:
                     slot_values[camelcase(class_def.name)][slot.name] = None
-                elif slot.multivalued:
+                elif slot.multivalued and not slot.required:
                     has_identifier_slot = self.range_class_has_identifier_slot(slot)
 
                     if slot.inlined and not slot.inlined_as_list and has_identifier_slot:
