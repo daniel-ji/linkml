@@ -1,5 +1,7 @@
+import sys
+from collections.abc import Generator
 from importlib.util import find_spec
-from typing import Any, ClassVar, Dict, Generator, List, Literal, Optional, Union
+from typing import Any, ClassVar, Literal, Optional, Union, get_args
 
 from jinja2 import Environment, PackageLoader
 from pydantic import BaseModel, Field, field_validator
@@ -26,6 +28,14 @@ else:
     def computed_field(f):
         """No-op decorator to allow this module to not break imports until 1.9.0"""
         return f
+
+
+IMPORT_GROUPS = Literal["future", "stdlib", "thirdparty", "local", "conditional"]
+"""
+See :attr:`.Import.group` and :attr:`.Imports.sort`
+
+Order of this literal is used in sort and therefore not arbitrary.
+"""
 
 
 class PydanticTemplateModel(TemplateModel):
@@ -65,7 +75,7 @@ class PydanticTemplateModel(TemplateModel):
         loader=PackageLoader("linkml.generators.pydanticgen", "templates"), trim_blocks=True, lstrip_blocks=True
     )
 
-    meta_exclude: ClassVar[List[str]] = None
+    meta_exclude: ClassVar[list[str]] = None
 
     def render(self, environment: Optional[Environment] = None, black: bool = False) -> str:
         """
@@ -116,7 +126,7 @@ class PydanticEnum(PydanticTemplateModel):
 
     name: str
     description: Optional[str] = None
-    values: Dict[str, EnumValue] = Field(default_factory=dict)
+    values: dict[str, EnumValue] = Field(default_factory=dict)
 
 
 class PydanticBaseModel(PydanticTemplateModel):
@@ -132,7 +142,7 @@ class PydanticBaseModel(PydanticTemplateModel):
     """
     Sets the ``extra`` model for pydantic models
     """
-    fields: Optional[List[str]] = None
+    fields: Optional[list[str]] = None
     """
     Extra fields that are typically injected into the base model via
     :attr:`~linkml.generators.pydanticgen.PydanticGenerator.injected_fields`
@@ -157,7 +167,7 @@ class PydanticAttribute(PydanticTemplateModel):
     """
 
     template: ClassVar[str] = "attribute.py.jinja"
-    meta_exclude: ClassVar[List[str]] = ["from_schema", "owner", "range", "inlined", "inlined_as_list"]
+    meta_exclude: ClassVar[list[str]] = ["from_schema", "owner", "range", "inlined", "inlined_as_list"]
 
     name: str
     required: bool = False
@@ -177,7 +187,7 @@ class PydanticAttribute(PydanticTemplateModel):
     maximum_cardinality: Optional[int] = None
     multivalued: Optional[bool] = None
     pattern: Optional[str] = None
-    meta: Optional[Dict[str, Any]] = None
+    meta: Optional[dict[str, Any]] = None
     """
     Metadata for the slot to be included in a Field annotation
     """
@@ -213,29 +223,29 @@ class PydanticClass(PydanticTemplateModel):
     """
 
     template: ClassVar[str] = "class.py.jinja"
-    meta_exclude: ClassVar[List[str]] = ["slots", "is_a"]
+    meta_exclude: ClassVar[list[str]] = ["slots", "is_a"]
 
     name: str
-    bases: Union[List[str], str] = PydanticBaseModel.default_name
+    bases: Union[list[str], str] = PydanticBaseModel.default_name
     description: Optional[str] = None
-    attributes: Optional[Dict[str, PydanticAttribute]] = None
-    meta: Optional[Dict[str, Any]] = None
+    attributes: Optional[dict[str, PydanticAttribute]] = None
+    meta: Optional[dict[str, Any]] = None
     """
     Metadata for the class to be included in a linkml_meta class attribute
     """
 
-    def _validators(self) -> Optional[Dict[str, PydanticValidator]]:
+    def _validators(self) -> Optional[dict[str, PydanticValidator]]:
         if self.attributes is None:
             return None
 
         return {k: PydanticValidator(**v.model_dump()) for k, v in self.attributes.items() if v.pattern is not None}
 
     @computed_field
-    def validators(self) -> Optional[Dict[str, PydanticValidator]]:
+    def validators(self) -> Optional[dict[str, PydanticValidator]]:
         return self._validators()
 
     @computed_field
-    def slots(self) -> Optional[Dict[str, PydanticAttribute]]:
+    def slots(self) -> Optional[dict[str, PydanticAttribute]]:
         """alias of attributes"""
         return self.attributes
 
@@ -284,7 +294,7 @@ class Import(PydanticTemplateModel):
     template: ClassVar[str] = "imports.py.jinja"
     module: str
     alias: Optional[str] = None
-    objects: Optional[List[ObjectImport]] = None
+    objects: Optional[list[ObjectImport]] = None
     is_schema: bool = False
     """
     Whether or not this ``Import`` is importing another schema imported by the main schema --
@@ -292,7 +302,29 @@ class Import(PydanticTemplateModel):
     Used primarily in split schema generation, see :func:`.pydanticgen.generate_split` for example usage.
     """
 
-    def merge(self, other: "Import") -> List["Import"]:
+    @computed_field
+    def group(self) -> IMPORT_GROUPS:
+        """
+        Import group used when sorting
+
+        * ``future`` - from `__future__` import...
+        * ``stdlib`` - ... the standard library
+        * ``thirdparty`` - other dependencies not in the standard library
+        * ``local`` - relative imports (eg. from split generation)
+        * ``conditional`` - a :class:`.ConditionalImport`
+        """
+        if self.module == "__future__":
+            return "future"
+        elif sys.version_info.minor >= 10 and self.module in sys.stdlib_module_names:
+            return "stdlib"
+        elif sys.version_info.minor < 10 and self.module in _some_stdlib_module_names:
+            return "stdlib"
+        elif self.module.startswith("."):
+            return "local"
+        else:
+            return "thirdparty"
+
+    def merge(self, other: "Import") -> list["Import"]:
         """
         Merge one import with another, see :meth:`.Imports` for an example.
 
@@ -346,6 +378,16 @@ class Import(PydanticTemplateModel):
             # one is a module, the other imports objects, keep both
             return [self, other]
 
+    def sort(self) -> None:
+        """
+        Sort imported objects
+
+        * First by whether the first letter is capitalized or not,
+        * Then alphabetically (by object name rather than alias)
+        """
+        if self.objects:
+            self.objects = sorted(self.objects, key=lambda obj: (obj.name[0].islower(), obj.name))
+
 
 class ConditionalImport(Import):
     """
@@ -391,6 +433,17 @@ class ConditionalImport(Import):
     condition: str
     alternative: Import
 
+    @computed_field
+    def group(self) -> Literal["conditional"]:
+        return "conditional"
+
+    def sort(self) -> None:
+        """
+        :meth:`.Import.sort` called for self and :attr:`.alternative`
+        """
+        super().sort()
+        self.alternative.sort()
+
 
 class Imports(PydanticTemplateModel):
     """
@@ -426,12 +479,16 @@ class Imports(PydanticTemplateModel):
 
     template: ClassVar[str] = "imports.py.jinja"
 
-    imports: List[Union[Import, ConditionalImport]] = Field(default_factory=list)
+    imports: list[Union[Import, ConditionalImport]] = Field(default_factory=list)
+    group_order: tuple[str, ...] = get_args(IMPORT_GROUPS)
+    """Order in which to sort imports by their :attr:`.Import.group`"""
+    render_sorted: bool = True
+    """When rendering, render in sorted groups"""
 
     @classmethod
     def _merge(
-        cls, imports: List[Union[Import, ConditionalImport]], other: Union[Import, "Imports", List[Import]]
-    ) -> List[Union[Import, ConditionalImport]]:
+        cls, imports: list[Union[Import, ConditionalImport]], other: Union[Import, "Imports", list[Import]]
+    ) -> list[Union[Import, ConditionalImport]]:
         """
         Add a new import to an existing imports list, handling deduplication and flattening.
 
@@ -484,20 +541,23 @@ class Imports(PydanticTemplateModel):
                         break
 
         # SPECIAL CASE - __future__ annotations must happen at the top of a file
+        # sort here outside of sort method because our imports are invalid without it,
+        # where calling ``sort`` should be optional.
         imports = sorted(imports, key=lambda i: i.module == "__future__", reverse=True)
         return imports
 
-    def __add__(self, other: Union[Import, "Imports", List[Import]]) -> "Imports":
+    def __add__(self, other: Union[Import, "Imports", list[Import]]) -> "Imports":
         imports = self.imports.copy()
         imports = self._merge(imports, other)
-        return Imports.model_construct(imports=imports)
+        return Imports.model_construct(
+            imports=imports, **{k: getattr(self, k, None) for k in self.model_fields if k != "imports"}
+        )
 
     def __len__(self) -> int:
         return len(self.imports)
 
     def __iter__(self) -> Generator[Import, None, None]:
-        for i in self.imports:
-            yield i
+        yield from self.imports
 
     def __getitem__(self, item: Union[int, str]) -> Import:
         if isinstance(item, int):
@@ -511,7 +571,7 @@ class Imports(PydanticTemplateModel):
         else:
             raise TypeError(f"Can only index with an int or a string as the name of the module,\nGot: {type(item)}")
 
-    def __contains__(self, item: Union[Import, "Imports", List[Import]]) -> bool:
+    def __contains__(self, item: Union[Import, "Imports", list[Import]]) -> bool:
         """
         Check if all the objects are imported from the given module(s)
 
@@ -536,13 +596,13 @@ class Imports(PydanticTemplateModel):
             else:
                 return all([obj in an_import.objects for obj in item.objects])
         else:
-            raise TypeError("Imports only contains single Import objects or other Imports\n" f"Got: {type(item)}")
+            raise TypeError(f"Imports only contains single Import objects or other Imports\nGot: {type(item)}")
 
     @field_validator("imports", mode="after")
     @classmethod
     def imports_are_merged(
-        cls, imports: List[Union[Import, ConditionalImport]]
-    ) -> List[Union[Import, ConditionalImport]]:
+        cls, imports: list[Union[Import, ConditionalImport]]
+    ) -> list[Union[Import, ConditionalImport]]:
         """
         When creating from a list of imports, construct model as if we have done so by iteratively
         constructing with __add__ calls
@@ -551,6 +611,36 @@ class Imports(PydanticTemplateModel):
         for i in imports:
             merged_imports = cls._merge(merged_imports, i)
         return merged_imports
+
+    @computed_field
+    def import_groups(self) -> list[IMPORT_GROUPS]:
+        """
+        List of what group each import belongs to
+        """
+        return [i.group for i in self.imports]
+
+    def sort(self) -> None:
+        """
+        Sort imports recursively, mimicking isort:
+
+        * First by :attr:`.Import.group` according to :attr:`.Imports.group_order`
+        * Then by whether the :class:`.Import` has any objects
+          (``import module`` comes before ``from module import name``)
+        * Then alphabetically by module name
+        """
+
+        def _sort_key(i: Import) -> tuple[int, int, str]:
+            return (self.group_order.index(i.group), int(i.objects is not None), i.module)
+
+        imports = sorted(self.imports, key=_sort_key)
+        for i in imports:
+            i.sort()
+        self.imports = imports
+
+    def render(self, environment: Optional[Environment] = None, black: bool = False) -> str:
+        if self.render_sorted:
+            self.sort()
+        return super().render(environment=environment, black=black)
 
 
 class PydanticModule(PydanticTemplateModel):
@@ -564,15 +654,41 @@ class PydanticModule(PydanticTemplateModel):
     metamodel_version: Optional[str] = None
     version: Optional[str] = None
     base_model: PydanticBaseModel = PydanticBaseModel()
-    injected_classes: Optional[List[str]] = None
-    python_imports: List[Union[Import, ConditionalImport]] = Field(default_factory=list)
-    enums: Dict[str, PydanticEnum] = Field(default_factory=dict)
-    classes: Dict[str, PydanticClass] = Field(default_factory=dict)
-    meta: Optional[Dict[str, Any]] = None
+    injected_classes: Optional[list[str]] = None
+    python_imports: Union[Imports, list[Union[Import, ConditionalImport]]] = Imports()
+    enums: dict[str, PydanticEnum] = Field(default_factory=dict)
+    classes: dict[str, PydanticClass] = Field(default_factory=dict)
+    meta: Optional[dict[str, Any]] = None
     """
     Metadata for the schema to be included in a linkml_meta module-level instance of LinkMLMeta
     """
 
+    @field_validator("python_imports", mode="after")
+    @classmethod
+    def cast_imports(cls, imports: Union[Imports, list[Union[Import, ConditionalImport]]]) -> Imports:
+        if isinstance(imports, list):
+            imports = Imports(imports=imports)
+        return imports
+
     @computed_field
-    def class_names(self) -> List[str]:
+    def class_names(self) -> list[str]:
         return [c.name for c in self.classes.values()]
+
+
+_some_stdlib_module_names = {
+    "copy",
+    "datetime",
+    "decimal",
+    "enum",
+    "inspect",
+    "os",
+    "re",
+    "sys",
+    "typing",
+    "dataclasses",
+}
+"""
+sys.stdlib_module_names is only present in 3.10 and later
+so we make a cheap copy of the stdlib modules that we commonly use here,
+but this should be removed whenever support for 3.9 is dropped.
+"""

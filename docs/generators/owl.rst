@@ -21,7 +21,7 @@ rendering)
 
 .. seealso:: The `linkml-owl <https://github.com/linkml/linkml-owl>`_
              maps between LinkML *data* and OWL
-             
+
 .. note:: The OWL is rendered as RDF/turtle. We recommend the suffix
           ``.owl.ttl`` to distinguish from the direct RDF mapping
 
@@ -56,8 +56,8 @@ Mapping
 * By default both ``is_a`` and ``mixins`` are mapped to ``rdfs:subClassOf``
 
     - Use ``--mixins-as-expressions`` to treat mixins as existential axioms
-  
-* Each LinkML element is rendered as an instance of the relevant metamodel class      
+
+* Each LinkML element is rendered as an instance of the relevant metamodel class
 
     - This means *punning* is used
     - Set ``--no-metaclasses`` if you do not want this behavior
@@ -74,6 +74,7 @@ Enums and PermissibleValues are treated as *classes* by default. An enum has a *
 an OWL ``UnionOf`` construct.
 
 * Use ``--default-permissible-value-type`` to change the default type
+* Use ``--enum-iri-separator`` to change the separator character in the enum IRI which is ``#`` by default
 
 You can make an enum represent individuals by adding an ``implements`` slot assignment:
 
@@ -193,7 +194,7 @@ Other examples
 - `Biolink <https://bioportal.bioontology.org/ontologies/BIOLINK>`_ :
   translation of Biolink schema to OWL
 
-          
+
 Docs
 ----
 
@@ -209,6 +210,6 @@ Command Line
 Code
 ^^^^
 
-                   
+
 .. autoclass:: OwlSchemaGenerator
     :members: serialize

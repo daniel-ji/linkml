@@ -47,6 +47,8 @@ The range must be one of:
  * An [EnumDefinition](https://w3id.org/linkml/EnumDefinition), when the value of the slot is a token that represents a vocabulary element
  * A boolean combination of the above
 
+To use a URI or CURIE as a range, create a class with class_uri set to the URI or CURIE and use that class as the range.
+
 Examples:
 
 ```yaml
@@ -80,7 +82,7 @@ classes:
   VehiclePart:
     slots:
       - part_number
-  
+
 slots:
   make:
     range: string
@@ -118,7 +120,7 @@ The `parts` slot is refined to have a range of `CarPart` for `Car` and `BicycleP
 Note that LinkML schemas are [monotonic](https://en.wikipedia.org/wiki/Monotonicity_of_entailment). This means
 it's not possible to *override* existing constraints, new constraints are always additive and "layered on".
 
-In the above example, you can think of a `Car` having *two* constraints on the `parts` slot: 
+In the above example, you can think of a `Car` having *two* constraints on the `parts` slot:
 
 - one from the `Vehicle` class, stating that the range is `VehiclePart`
 - and one from the `Car` class, stating that the range is `CarPart`
@@ -236,7 +238,7 @@ inverses.
 
 The `ifabsent` slot can be used to specify a default value for a slot using the syntax shown in the examples below.
 
-Examples: 
+Examples:
 
 ```yaml
 slots:

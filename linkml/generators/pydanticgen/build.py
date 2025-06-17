@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Optional, Type, TypeVar, Union
+from typing import Optional, TypeVar, Union
 
 from linkml.generators.common.build import (
     BuildResult,
@@ -24,8 +24,8 @@ class PydanticBuildResult(BuildResult):
     BuildResult parent class for pydantic generator
     """
 
-    imports: Optional[Union[List[Import], Imports]] = None
-    injected_classes: Optional[List[Union[str, Type]]] = None
+    imports: Optional[Union[list[Import], Imports]] = None
+    injected_classes: Optional[list[Union[str, type]]] = None
 
     def merge(self, other: T) -> T:
         """
@@ -59,8 +59,10 @@ class PydanticBuildResult(BuildResult):
                 self_copy.imports = other.imports
         if other.injected_classes:
             if self_copy.injected_classes is not None:
-                self_copy.injected_classes.extend(other.injected_classes)
-                self_copy.injected_classes = list(dict.fromkeys(self_copy.injected_classes))
+                # only combine and dedupe when injected_classes don't match
+                if self_copy.injected_classes != other.injected_classes:
+                    self_copy.injected_classes.extend(other.injected_classes)
+                    self_copy.injected_classes = list(dict.fromkeys(self_copy.injected_classes))
             else:
                 self_copy.injected_classes = other.injected_classes
         return self_copy
@@ -90,7 +92,7 @@ class RangeResult(PydanticBuildResult, RangeResult_):
         Returns:
             :class:`.SlotResult`
         """
-        res = super(RangeResult, self).merge(other)
+        res = super().merge(other)
         # Replace with other's annotation
         res.range = other.range
         if other.field_extras is not None:

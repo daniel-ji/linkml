@@ -2,7 +2,6 @@ import json
 import os
 import warnings
 from dataclasses import dataclass
-from typing import List
 
 import click
 from linkml_runtime.linkml_model.meta import ClassDefinition, SlotDefinition
@@ -62,8 +61,8 @@ class TerminusdbGenerator(Generator):
     uses_schemaloader = True
 
     # ObjectVars
-    classes: List = None
-    raw_additions: List = None
+    classes: list = None
+    raw_additions: list = None
     clswq: str = None
 
     def __post_init__(self):
@@ -115,8 +114,7 @@ class TerminusdbGenerator(Generator):
 
         if rng not in XSD_Ok and slot.range not in self.schema.classes:
             raise Exception(
-                f"slot range for {name} must be schema class or supported xsd type. "
-                f"Range {rng} is of type {type(rng)}."
+                f"slot range for {name} must be schema class or supported xsd type. Range {rng} is of type {type(rng)}."
             )
 
         self.clswq.property(underscore(name), rng, label=name, description=slot.description)

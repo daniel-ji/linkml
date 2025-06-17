@@ -1,10 +1,13 @@
 import re
 from types import ModuleType
 
+import pytest
 from linkml_runtime.loaders import json_loader
 from linkml_runtime.utils.compile_python import compile_python
 
 from linkml.generators.pythongen import PythonGenerator
+
+pytestmark = pytest.mark.pythongen
 
 
 def make_python(infile) -> ModuleType:
@@ -68,6 +71,13 @@ def test_multiline_stuff(input_path):
     )
 
 
+def test_enum_permissiblevalue_ifabsent(input_path):
+    # this would fail if generated python code is not compilable
+    ksm = make_python(input_path("kitchen_sink_ifabsent.yaml"))
+    # ensure that the right permissible value is taken if other value absent
+    assert ksm.IfAbsent().ifabsent_not_literal is ksm.CordialnessEnum.heartfelt
+
+
 def test_head():
     """Validate the head/nohead parameter"""
     yaml = """id: "https://w3id.org/biolink/metamodel"
@@ -89,9 +99,7 @@ types:
         source_file_date="August 10, 2020",
         source_file_size=173,
     ).serialize()
-    assert output.startswith(
-        f"# Auto generated from None by pythongen.py version: " f"{PythonGenerator.generatorversion}"
-    )
+    assert output.startswith(f"# Auto generated from None by pythongen.py version: {PythonGenerator.generatorversion}")
 
     output = PythonGenerator(yaml, format="py", metadata=False).serialize()
     assert output.startswith("\n# id: https://w3id.org/biolink/metamodel")

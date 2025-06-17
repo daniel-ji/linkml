@@ -1,9 +1,19 @@
+"""Rule implementation for the linkml linter."""
+
+from __future__ import annotations
+
 import re
 from abc import ABC, abstractmethod
-from functools import lru_cache
-from typing import Callable, Iterable, List
+from collections.abc import Iterable
+from functools import cache
+from typing import Callable
 
-from linkml_runtime.linkml_model import ClassDefinition, ClassDefinitionName, Element, SlotDefinition
+from linkml_runtime.linkml_model import (
+    ClassDefinition,
+    ClassDefinitionName,
+    Element,
+    SlotDefinition,
+)
 from linkml_runtime.utils.schemaview import SchemaView
 from prefixmaps.io.parser import load_multi_context
 
@@ -55,8 +65,14 @@ class LinterRule(ABC):
 class NoEmptyTitleRule(LinterRule):
     id = "no_empty_title"
 
+    # todo PVs are not checked for titles yet
+
     def check(self, schema_view: SchemaView, fix: bool = False) -> Iterable[LinterProblem]:
+        excluded_types = [t.text if hasattr(t, "text") else str(t) for t in getattr(self.config, "exclude_type", [])]
         for e in schema_view.all_elements(imports=False).values():
+            element_type_name = type(e).class_name
+            if element_type_name in excluded_types:
+                continue
             if fix and e.title is None:
                 title = e.name.replace("_", " ")
                 title = self.uncamel(title).lower()
@@ -84,13 +100,13 @@ class PermissibleValuesFormatRule(LinterRule):
     def check(self, schema_view: SchemaView, fix: bool = False) -> Iterable[LinterProblem]:
         pattern = self.PATTERNS.get(self.config.format, re.compile(self.config.format))
         for enum_def in schema_view.all_enums(imports=False).values():
-            for value in enum_def.permissible_values.keys():
+            for value in enum_def.permissible_values:
                 if pattern.fullmatch(value) is None:
                     yield LinterProblem(f"{self.format_element(enum_def)} has permissible value '{value}'")
 
 
-@lru_cache(maxsize=None)
-def _get_recommended_metamodel_slots() -> List[str]:
+@cache
+def _get_recommended_metamodel_slots() -> list[str]:
     meta_schema_view = SchemaView(LOCAL_METAMODEL_YAML_FILE)
     recommended_meta_slots = []
     for class_name in meta_schema_view.all_classes(imports=False).keys():
@@ -104,15 +120,21 @@ def _get_recommended_metamodel_slots() -> List[str]:
 class RecommendedRule(LinterRule):
     id = "recommended"
 
+    # todo PVs are not checked for recommended fields yet
+
     def __init__(self, config: RecommendedRuleConfig) -> None:
         self.config = config
 
     def check(self, schema_view: SchemaView, fix: bool = False):
         recommended_meta_slots = _get_recommended_metamodel_slots()
+        excluded_types = [t.text if hasattr(t, "text") else str(t) for t in getattr(self.config, "exclude_type", [])]
         for element_name, element_definition in schema_view.all_elements(imports=False).items():
+            element_type_name = type(element_definition).class_name
             if self.config.include and element_name not in self.config.include:
                 continue
             if element_name in self.config.exclude:
+                continue
+            if element_type_name in excluded_types:
                 continue
             for meta_slot_name, meta_slot_value in vars(element_definition).items():
                 key = f"{element_definition.class_name}__{meta_slot_name}"
@@ -134,26 +156,26 @@ class TreeRootClassRule(LinterRule):
             if self.config.validate_existing_class_name:
                 for tree_root in tree_roots:
                     if str(tree_root.name) != self.config.root_class_name:
-                        yield LinterProblem(message=f"Tree root class has name '{tree_root.name}'")
+                        yield LinterProblem(message=f"Tree root class has an invalid name '{tree_root.name}'")
+            if len(tree_roots) > 1:
+                yield LinterProblem("Schema has more than one class with `tree_root: true`")
+        elif fix:
+            container = ClassDefinition(self.config.root_class_name, tree_root=True)
+            schema_view.add_class(container)
+            self.add_index_slots(schema_view, container.name)
         else:
-            if fix:
-                container = ClassDefinition(self.config.root_class_name, tree_root=True)
-                schema_view.add_class(container)
-                self.add_index_slots(schema_view, container.name)
-            else:
-                yield LinterProblem("Schema does not have class with `tree_root: true`")
+            yield LinterProblem("Schema does not have class with `tree_root: true`")
 
     def add_index_slots(
         self,
         schema_view: SchemaView,
         container_name: ClassDefinitionName,
-        inlined_as_list=False,
-        must_have_identifier=False,
-        slot_name_func: Callable = None,
-        convert_camel_case=False,
-    ) -> List[SlotDefinition]:
-        """
-        Adds index slots to a container pointing at all top-level classes
+        inlined_as_list: bool = False,
+        must_have_identifier: bool = False,
+        slot_name_func: Callable | None = None,
+        convert_camel_case: bool = False,
+    ) -> list[SlotDefinition]:
+        """Add index slots to a container pointing at all top-level classes.
 
         :param schema: input schema, will be modified in place
         :param container_name:
@@ -163,14 +185,11 @@ class TreeRootClassRule(LinterRule):
         :return: new slots
         """
         container = schema_view.get_class(container_name)
-        ranges = set()
-        for cn in schema_view.all_classes():
-            for s in schema_view.class_induced_slots(cn):
-                ranges.add(s.range)
+        ranges = {s.range for cn in schema_view.all_classes() for s in schema_view.class_induced_slots(cn)}
         top_level_classes = [c for c in schema_view.all_classes().values() if not c.tree_root and c.name not in ranges]
         if must_have_identifier:
             top_level_classes = [c for c in top_level_classes if schema_view.get_identifier_slot(c.name) is not None]
-        index_slots = []
+        index_slots: list[SlotDefinition] = []
         for c in top_level_classes:
             has_identifier = schema_view.get_identifier_slot(c.name)
             if slot_name_func:
@@ -193,6 +212,30 @@ class TreeRootClassRule(LinterRule):
         return index_slots
 
 
+class NoUndeclaredSlotsRule(LinterRule):
+    """Linter rule to check that all slots from a class have been declared in the `slots` section."""
+
+    id = "no_undeclared_slots"
+
+    def check(self, schema_view: SchemaView, fix: bool = False) -> Iterable[LinterProblem]:
+        """Perform the check for undeclared slots.
+
+        :param schema_view: schema to be checked in a SchemaView object.
+        :type schema_view: SchemaView
+        :param fix: whether or not to fix, defaults to False
+        :type fix: bool, optional
+        :yield: iterable of error messages about non-compliant slots.
+        :rtype: Iterator[Iterable[LinterProblem]]
+        """
+        all_slots = schema_view.all_slots()
+        for class_name in schema_view.all_classes():
+            for slot_name in schema_view.class_slots(class_name):
+                if slot_name not in all_slots:
+                    yield LinterProblem(
+                        f"Slot '{slot_name}' from class '{class_name}' not found in schema 'slots' declaration."
+                    )
+
+
 class NoInvalidSlotUsageRule(LinterRule):
     id = "no_invalid_slot_usage"
 
@@ -202,7 +245,7 @@ class NoInvalidSlotUsageRule(LinterRule):
             if not slot_usage:
                 continue
             class_slots = schema_view.class_slots(class_name)
-            for slot_usage_name in slot_usage.keys():
+            for slot_usage_name in slot_usage:
                 if slot_usage_name not in class_slots:
                     yield LinterProblem(f"Slot '{slot_usage_name}' not found on class '{class_name}'")
 
@@ -214,6 +257,7 @@ class StandardNamingRule(LinterRule):
         self.config = config
 
     def check(self, schema_view: SchemaView, fix: bool = False) -> Iterable[LinterProblem]:
+        excluded_types = [t.text if hasattr(t, "text") else str(t) for t in getattr(self.config, "exclude_type", [])]
         class_pattern = (
             self.PATTERNS["uppercamel"]
             if not self.config.class_pattern
@@ -230,24 +274,27 @@ class StandardNamingRule(LinterRule):
             self.PATTERNS["uppersnake"] if self.config.permissible_values_upper_case else self.PATTERNS["snake"]
         )
 
-        for class_name in schema_view.all_classes(imports=False).keys():
-            if class_pattern.fullmatch(class_name) is None:
-                yield LinterProblem(f"Class has name '{class_name}'")
+        if "class_definition" not in excluded_types:
+            for class_name in schema_view.all_classes(imports=False):
+                if class_pattern.fullmatch(class_name) is None:
+                    yield LinterProblem(f"Class has name '{class_name}'")
 
-        for slot_name in schema_view.all_slots(imports=False).keys():
-            if slot_pattern.fullmatch(slot_name) is None:
-                yield LinterProblem(f"Slot has name '{slot_name}'")
+        if "slot_definition" not in excluded_types:
+            for slot_name in schema_view.all_slots(imports=False):
+                if slot_pattern.fullmatch(slot_name) is None:
+                    yield LinterProblem(f"Slot has name '{slot_name}'")
 
         for enum_name, enum_definition in schema_view.all_enums(imports=False).items():
-            if enum_pattern.fullmatch(enum_name) is None:
+            if "enum_definition" not in excluded_types and enum_pattern.fullmatch(enum_name) is None:
                 yield LinterProblem(f"Enum has name '{enum_name}'")
 
-            for permissible_value_name in enum_definition.permissible_values.keys():
-                if permissible_value_pattern.fullmatch(permissible_value_name) is None:
-                    yield LinterProblem(
-                        f"Permissible value of {self.format_element(enum_definition)} "
-                        f"has name '{permissible_value_name}'"
-                    )
+            if "permissible_value" not in excluded_types:
+                for permissible_value_name in enum_definition.permissible_values:
+                    if permissible_value_pattern.fullmatch(permissible_value_name) is None:
+                        yield LinterProblem(
+                            f"Permissible value of {self.format_element(enum_definition)} "
+                            f"has name '{permissible_value_name}'"
+                        )
 
 
 class CanonicalPrefixesRule(LinterRule):
@@ -261,17 +308,21 @@ class CanonicalPrefixesRule(LinterRule):
         prefix_to_namespace = context.as_dict()
         namespace_to_prefix = context.as_inverted_dict()
         for prefix in schema_view.schema.prefixes.values():
-            if prefix.prefix_prefix in prefix_to_namespace:
-                if prefix.prefix_reference != prefix_to_namespace[prefix.prefix_prefix]:
-                    yield LinterProblem(
-                        f"Schema maps prefix '{prefix.prefix_prefix}' to namespace "
-                        f"'{prefix.prefix_reference}' instead of namespace "
-                        f"'{prefix_to_namespace[prefix.prefix_prefix]}'"
-                    )
-            if prefix.prefix_reference in namespace_to_prefix:
-                if prefix.prefix_prefix != namespace_to_prefix[prefix.prefix_reference]:
-                    yield LinterProblem(
-                        f"Schema maps prefix '{prefix.prefix_prefix}' to namespace "
-                        f"'{prefix.prefix_reference}' instead of using prefix "
-                        f"'{namespace_to_prefix[prefix.prefix_reference]}'"
-                    )
+            if (
+                prefix.prefix_prefix in prefix_to_namespace
+                and prefix.prefix_reference != prefix_to_namespace[prefix.prefix_prefix]
+            ):
+                yield LinterProblem(
+                    f"Schema maps prefix '{prefix.prefix_prefix}' to namespace "
+                    f"'{prefix.prefix_reference}' instead of namespace "
+                    f"'{prefix_to_namespace[prefix.prefix_prefix]}'"
+                )
+            if (
+                prefix.prefix_reference in namespace_to_prefix
+                and prefix.prefix_prefix != namespace_to_prefix[prefix.prefix_reference]
+            ):
+                yield LinterProblem(
+                    f"Schema maps prefix '{prefix.prefix_prefix}' to namespace "
+                    f"'{prefix.prefix_reference}' instead of using prefix "
+                    f"'{namespace_to_prefix[prefix.prefix_reference]}'"
+                )

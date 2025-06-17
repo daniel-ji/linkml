@@ -1,6 +1,4 @@
-""" Generate JSONld
-
-"""
+"""Generate JSONld from a LinkML schema."""
 
 import os
 from copy import deepcopy
@@ -108,7 +106,9 @@ class JSONLDGenerator(Generator):
                     else (
                         SubsetDefinitionName(camelcase(node))
                         if node in self.schema.subsets
-                        else TypeDefinitionName(underscore(node)) if node in self.schema.types else None
+                        else TypeDefinitionName(underscore(node))
+                        if node in self.schema.types
+                        else None
                     )
                 )
             )
@@ -164,7 +164,7 @@ class JSONLDGenerator(Generator):
             # model_context = self.schema.source_file.replace('.yaml', '.prefixes.context.jsonld')
             # context = [METAMODEL_CONTEXT_URI, f'file://./{model_context}']
             # TODO: The _visit function above alters the schema in situ
-            add_prefixes = ContextGenerator(self.original_schema, model=False, metadata=False).serialize()
+            add_prefixes = ContextGenerator(self.original_schema, model=False, emit_metadata=False).serialize()
             add_prefixes_json = loads(add_prefixes)
             context = [METAMODEL_CONTEXT_URI, add_prefixes_json["@context"]]
         elif isinstance(context, str):  # Some of the older code doesn't do multiple contexts

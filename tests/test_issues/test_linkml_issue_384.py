@@ -1,3 +1,4 @@
+import pytest
 from linkml_runtime.linkml_model import String
 from rdflib import Graph, URIRef
 from rdflib.namespace import OWL, RDF, RDFS, XSD
@@ -58,6 +59,7 @@ def _contains_restriction(g: Graph, c: URIRef, prop: URIRef, pred: URIRef, fille
     return False
 
 
+@pytest.mark.owlgen
 def test_issue_owl_properties(input_path, snapshot):
     def uri(s) -> URIRef:
         return URIRef(f"https://w3id.org/linkml/examples/personinfo/{s}")
@@ -87,9 +89,9 @@ def test_issue_owl_properties(input_path, snapshot):
             assert (p, RDF.type, OWL.ObjectProperty) in g
         assert _contains_restriction(g, Person, parent, OWL.allValuesFrom, Person)
         assert _contains_restriction(g, Organization, parent, OWL.allValuesFrom, Organization)
-        assert _contains_restriction(
-            g, Person, aliases, OWL.allValuesFrom, string_rep
-        ), f"expected {string_rep} for {conf}"
+        assert _contains_restriction(g, Person, aliases, OWL.allValuesFrom, string_rep), (
+            f"expected {string_rep} for {conf}"
+        )
         # TODO: also validate cardinality restrictions
         # assert self._contains_restriction(g, Thing, full_name, OWL.allValuesFrom, string_rep)
 
@@ -98,5 +100,10 @@ def test_issue_owl_properties(input_path, snapshot):
     # self.assertIn((NAME, RDF.type, OWL.ObjectProperty), g)
 
 
+@pytest.mark.rdfgen
+@pytest.mark.jsonldcontextgen
+@pytest.mark.yamlgen
+@pytest.mark.pythongen
+@pytest.mark.network
 def test_other_formats(input_path, snapshot):
     _test_other(TESTFILE, input_path, snapshot)

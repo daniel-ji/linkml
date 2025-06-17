@@ -1,7 +1,8 @@
 import operator
+from collections.abc import Collection
 from copy import deepcopy
 from itertools import product
-from typing import Any, Collection, List, Optional, Tuple, Type
+from typing import Any, Optional
 
 
 def member_of(item: Any, collection: Collection[Any]) -> bool:
@@ -121,14 +122,14 @@ class And(Expression):
     """Conjunction of expressions"""
 
     def __init__(self, *operands: Expression):
-        self.operands: List[Expression] = list(operands)
+        self.operands: list[Expression] = list(operands)
 
     def __str__(self):
-        return f'({" & ".join(str(operand) for operand in self.operands)})'
+        return f"({' & '.join(str(operand) for operand in self.operands)})"
 
     def _ordered_str(self, **kwargs):
         sorted_operands = sorted([op._ordered_str(**kwargs) for op in self.operands], key=str)
-        return f'({" & ".join(sorted_operands)})'
+        return f"({' & '.join(sorted_operands)})"
 
 
 class Or(Expression):
@@ -136,13 +137,13 @@ class Or(Expression):
         self.operands = list(operands)
 
     def __str__(self):
-        return f'({" | ".join(str(operand) for operand in self.operands)})'
+        return f"({' | '.join(str(operand) for operand in self.operands)})"
 
     def _ordered_str(self, pairwise=False):
         if pairwise and len(self.operands) > 2:
             return Or(Or(*self.operands[0:2]), Or(*self.operands[2:]))._ordered_str(pairwise=True)
         sorted_operands = sorted([op._ordered_str(pairwise=True) for op in self.operands], key=str)
-        return f'({" | ".join(sorted_operands)})'
+        return f"({' | '.join(sorted_operands)})"
 
 
 class Eq(Expression):
@@ -166,14 +167,14 @@ class Term(Expression):
         if self.predicate in OPS:
             return f"{str(self.operands[0])} {OPS[self.predicate]} {str(self.operands[1])}"
         else:
-            return f'{self.predicate}({", ".join(str(operand) for operand in self.operands)})'
+            return f"{self.predicate}({', '.join(str(operand) for operand in self.operands)})"
 
     def _ordered_str(self, **kwargs):
         return str(self)
 
 
 class IsIn(Term):
-    def __init__(self, element: Expression, collection: List[Any]):
+    def __init__(self, element: Expression, collection: list[Any]):
         self.predicate = "in"
         self.operands = [element, collection]
 
@@ -640,7 +641,7 @@ def _unsat(x: Expression, y: Expression) -> bool:
     return False
 
 
-def compose_operators(boolean_op: Type[Expression], op1: str, v1: Any, op2: str, v2: Any) -> Optional[Tuple]:
+def compose_operators(boolean_op: type[Expression], op1: str, v1: Any, op2: str, v2: Any) -> Optional[tuple]:
     """
     Compose two expressions.
 
